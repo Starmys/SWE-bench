@@ -10,13 +10,18 @@ from datasets import load_from_disk, load_dataset
 from peft import PeftConfig, PeftModel
 from tqdm.auto import tqdm
 from transformers import (
-    LlamaTokenizer,
-    StoppingCriteria,
-    StoppingCriteriaList,
+    # LlamaTokenizer,
+    # StoppingCriteria,
+    # StoppingCriteriaList,
+    AutoTokenizer,
+    AutoModelForCausalLM,
 )
 from pathlib import Path
-from swebench.inference.llamao.modeling_flash_llama import LlamaForCausalLM as AutoModelForCausalLM
+# from swebench.inference.llamao.modeling_flash_llama import LlamaForCausalLM as AutoModelForCausalLM
 from swebench.inference.make_datasets.utils import extract_diff
+
+import vllm
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -119,38 +124,43 @@ def load_model(model_name_or_path, peft_path):
         "cpu": "20GIB",
     }
     logger.info(f"Using max memory {max_memory}")
-    if "-7b" in model_name_or_path:
-        device_map = DEVICE_MAPS["7b"][str(torch.cuda.device_count())]
-    elif "-13b" in model_name_or_path:
-        device_map = DEVICE_MAPS["13b"][str(torch.cuda.device_count())]
-    elif "-34b" in model_name_or_path:
-        device_map = DEVICE_MAPS["34b"][str(torch.cuda.device_count())]
-    else:
-        raise ValueError(f"No device map for {model_name_or_path}")
-    logger.info(f"Using device_map {device_map}")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
-        max_memory=max_memory,
-        device_map=device_map,
-        torch_dtype=torch.bfloat16,
-    ).eval()
-    if peft_path is None:
-        logger.info(f"No PEFT adapters to load")
-        return model
-    logger.info(f"Loading PEFT adapters from {peft_path}")
-    model = PeftModel.from_pretrained(
-        model,
-        peft_path,
-        device_map=device_map,
-        torch_dtype=torch.bfloat16,
-        max_memory=max_memory,
+    # if "-7b" in model_name_or_path:
+    #     device_map = DEVICE_MAPS["7b"][str(torch.cuda.device_count())]
+    # elif "-13b" in model_name_or_path:
+    #     device_map = DEVICE_MAPS["13b"][str(torch.cuda.device_count())]
+    # elif "-34b" in model_name_or_path:
+    #     device_map = DEVICE_MAPS["34b"][str(torch.cuda.device_count())]
+    # else:
+    #     raise ValueError(f"No device map for {model_name_or_path}")
+    # logger.info(f"Using device_map {device_map}")
+    # model = AutoModelForCausalLM.from_pretrained(
+    #     model_name_or_path,
+    #     max_memory=max_memory,
+    #     device_map=device_map,
+    #     torch_dtype=torch.bfloat16,
+    # ).eval()
+    model = vllm.LLM(
+        model=model_name_or_path,
+        tensor_parallel_size=4,
+        trust_remote_code=True,
     )
+    # if peft_path is None:
+    #     logger.info(f"No PEFT adapters to load")
+    #     return model
+    # logger.info(f"Loading PEFT adapters from {peft_path}")
+    # model = PeftModel.from_pretrained(
+    #     model,
+    #     peft_path,
+    #     device_map=device_map,
+    #     torch_dtype=torch.bfloat16,
+    #     max_memory=max_memory,
+    # )
     return model
 
 
 def load_tokenizer(model_name_or_path):
     logger.info(f"Loading tokenizer {model_name_or_path}")
-    tokenizer = LlamaTokenizer.from_pretrained(model_name_or_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
     return tokenizer
 
 
@@ -229,69 +239,83 @@ def load_data(
 
 
 def generate(model, dataset, tokenizer, temperature, top_p, fileobj, model_name_or_path, peft_path):
-    class RepeatingTokensCriteria(StoppingCriteria):
-        """
-        Stopping criteria based on repeating tokens in the generated sequence.
+    # class RepeatingTokensCriteria(StoppingCriteria):
+    #     """
+    #     Stopping criteria based on repeating tokens in the generated sequence.
 
-        Attributes:
-            min_length (int): The minimum length of the generated sequence.
-            min_tokens (int): The minimum number of unique tokens required in the suffix of the generated sequence.
-        """
+    #     Attributes:
+    #         min_length (int): The minimum length of the generated sequence.
+    #         min_tokens (int): The minimum number of unique tokens required in the suffix of the generated sequence.
+    #     """
 
-        def __init__(self, min_length=100, min_tokens=10):
-            super().__init__()
-            self.min_length = min_length
-            self.min_tokens = min_tokens
+    #     def __init__(self, min_length=100, min_tokens=10):
+    #         super().__init__()
+    #         self.min_length = min_length
+    #         self.min_tokens = min_tokens
 
-        def __call__(self, input_ids, scores, **kwargs):
-            """
-            Check if the stopping criteria is met based on repeating tokens.
+    #     def __call__(self, input_ids, scores, **kwargs):
+    #         """
+    #         Check if the stopping criteria is met based on repeating tokens.
 
-            Args:
-                input_ids (torch.Tensor): The input token IDs of the generated sequence.
-                scores (torch.Tensor): The scores of the generated sequence.
-                **kwargs: Additional keyword arguments.
+    #         Args:
+    #             input_ids (torch.Tensor): The input token IDs of the generated sequence.
+    #             scores (torch.Tensor): The scores of the generated sequence.
+    #             **kwargs: Additional keyword arguments.
 
-            Returns:
-                bool: True if the stopping criteria is met, False otherwise.
-            """
-            if input_ids[0, -1].cpu().item() == tokenizer.eos_token_id:
-                return True
-            if input_ids.shape[-1] < self.min_length:
-                return False
-            suffix = input_ids[0, -self.min_length:].cpu().tolist()
-            if len(set(suffix)) <= self.min_tokens:
-                return True
-            return False
+    #         Returns:
+    #             bool: True if the stopping criteria is met, False otherwise.
+    #         """
+    #         if input_ids[0, -1].cpu().item() == tokenizer.eos_token_id:
+    #             return True
+    #         if input_ids.shape[-1] < self.min_length:
+    #             return False
+    #         suffix = input_ids[0, -self.min_length:].cpu().tolist()
+    #         if len(set(suffix)) <= self.min_tokens:
+    #             return True
+    #         return False
 
-    stopping_criteria = StoppingCriteriaList([RepeatingTokensCriteria()])
+    # stopping_criteria = StoppingCriteriaList([RepeatingTokensCriteria()])
     fail_count = 0
+    sampling_params = vllm.SamplingParams(
+        max_tokens=200,
+        temperature=1.0 if temperature == 0 else temperature,
+        top_p=top_p,
+    )
     with torch.no_grad():
         for ix, instance in enumerate(tqdm(dataset, desc=f"Generating patches")):
             try:
-                input_ids = instance["input_ids"]
-                input_ids = torch.tensor(
-                    [input_ids], dtype=torch.long, device=model.device
-                )
-                logger.info(f"Processing {input_ids.shape[-1]} tokens")
+                # input_ids = instance["input_ids"]
+                # input_ids = torch.tensor(
+                #     [input_ids], dtype=torch.long, device=model.device
+                # )
+                # logger.info(f"Processing {input_ids.shape[-1]} tokens")
                 start = datetime.now()
+                # output = model.generate(
+                #     input_ids=input_ids,
+                #     attention_mask=torch.ones_like(input_ids),
+                #     temperature= 1.0 if temperature == 0 else temperature,
+                #     top_p=top_p,
+                #     do_sample=False if temperature == 0 else True,
+                #     max_new_tokens=200,
+                #     stopping_criteria=stopping_criteria,
+                # )
+                prompt = instance["text"]
                 output = model.generate(
-                    input_ids=input_ids,
-                    attention_mask=torch.ones_like(input_ids),
-                    temperature= 1.0 if temperature == 0 else temperature,
-                    top_p=top_p,
-                    do_sample=False if temperature == 0 else True,
-                    max_new_tokens=200,
-                    stopping_criteria=stopping_criteria,
-                )
-                total_len = output.shape[-1]
-                output = output[0].cpu()[input_ids.shape[-1] :]
-                new_len = len(output)
+                    prompts=[prompt],
+                    sampling_params=sampling_params,
+                )[0]
+                input_len = len(output.prompt_token_ids)
+                new_len = len(output.outputs[0].token_ids)
+                total_len = input_len + new_len
+                output = output.outputs[0].text
+                # total_len = output.shape[-1]
+                # output = output[0].cpu()[input_ids.shape[-1] :]
+                # new_len = len(output)
                 logger.info(
                     f"Generated {new_len} tokens ({total_len} total) in {(datetime.now() - start).total_seconds()} " + \
                     f"seconds (speed: {new_len / (datetime.now() - start).total_seconds()} tps)"
                 )
-                output = tokenizer.decode(output, skip_special_tokens=False)
+                # output = tokenizer.decode(output, skip_special_tokens=False)
                 logger.info(output[:200])
                 diff = extract_diff(output)
                 model_name_or_path += f"__{peft_path}" if peft_path is not None else ""
@@ -304,7 +328,7 @@ def generate(model, dataset, tokenizer, temperature, top_p, fileobj, model_name_
                 print(json.dumps(res), file=fileobj, flush=True)
             except Exception as e:
                 logger.exception(e)
-                print(f"failed on {ix} with {len(input_ids)} tokens")
+                # print(f"failed on {ix} with {len(input_ids)} tokens")
                 fail_count += 1
                 if fail_count >= 3:
                     raise ValueError("too many failures")
