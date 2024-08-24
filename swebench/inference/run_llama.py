@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 from datasets import load_from_disk, load_dataset
-from peft import PeftConfig, PeftModel
+# from peft import PeftConfig, PeftModel
 from tqdm.auto import tqdm
 from transformers import (
     # LlamaTokenizer,
@@ -141,8 +141,9 @@ def load_model(model_name_or_path, peft_path):
     # ).eval()
     model = vllm.LLM(
         model=model_name_or_path,
-        tensor_parallel_size=4,
+        tensor_parallel_size=8,
         trust_remote_code=True,
+        enforce_eager=True,
     )
     # if peft_path is None:
     #     logger.info(f"No PEFT adapters to load")
@@ -187,11 +188,11 @@ def load_data(
     """
     logger.info(f"Loading dataset from {dataset_path}")
     if not Path(dataset_path).exists():
-        dataset = load_dataset(dataset_path, split=split)
+        dataset = load_dataset(dataset_path, split=split, num_proc=16)
     elif Path(dataset_path, split).exists():
-        dataset = load_from_disk(Path(dataset_path) / split)
+        dataset = load_from_disk(Path(dataset_path) / split, num_proc=16)
     else:
-        dataset = load_dataset(dataset_path)[split]
+        dataset = load_dataset(dataset_path, num_proc=16)[split]
     if peft_path is not None:
         model_nickname = "__".join(peft_path.split("/")[-2:])
     else:
@@ -201,11 +202,12 @@ def load_data(
             lambda x: tokenizer(x["text"], truncation=False),
             batched=False,
             desc="tokenizing",
+            num_proc=16,
         )
     if "SWE-Llama" in model_name_or_path and dataset[0]["input_ids"][-2:] != [13, 13]:
         # SWE-Llama needs two exactly two newlines at the end
         dataset = dataset.map(
-            lambda x: {"input_ids": x["input_ids"] + [13]}, batched=False
+            lambda x: {"input_ids": x["input_ids"] + [13]}, batched=False, num_proc=16
         )
     filter_func = None
     if min_len is not None and max_len is None:
@@ -216,7 +218,8 @@ def load_data(
         filter_func = lambda x: min_len <= x < max_len
     if filter_func is not None:
         dataset = dataset.filter(
-            lambda x: filter_func(len(x["input_ids"])), desc="filtering for length"
+            lambda x: filter_func(len(x["input_ids"])), desc="filtering for length",
+            num_proc=16,
         )
     lens = torch.tensor(list(map(lambda x: len(x["input_ids"]), dataset)))
     dataset = dataset.select(lens.argsort())
@@ -371,13 +374,13 @@ def main(
         raise ValueError("num_shards must be specified with shard_id")
     if shard_id is None and num_shards is not None:
         raise ValueError("shard_id must be specified with num_shards")
-    peft_config = None
-    if peft_path is not None:
-        peft_config = PeftConfig.from_pretrained(peft_path)
-        if peft_config.base_model_name_or_path != model_name_or_path:
-            logger.warning(
-                f"model_name_or_path {model_name_or_path} does not match peft_path base_model {peft_config.base_model_name_or_path}"
-            )
+    # peft_config = None     
+    # if peft_path is not None:
+    #     peft_config = PeftConfig.from_pretrained(peft_path)
+    #     if peft_config.base_model_name_or_path != model_name_or_path:
+    #         logger.warning(
+    #             f"model_name_or_path {model_name_or_path} does not match peft_path base_model {peft_config.base_model_name_or_path}"
+    #         )
     output_file = get_output_file(
         output_dir=output_dir,
         model_name_or_path=model_name_or_path,
