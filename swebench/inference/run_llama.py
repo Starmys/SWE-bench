@@ -144,6 +144,7 @@ def load_model(model_name_or_path, peft_path):
         tensor_parallel_size=8,
         trust_remote_code=True,
         enforce_eager=True,
+        gpu_memory_utilization=0.95,
     )
     # if peft_path is None:
     #     logger.info(f"No PEFT adapters to load")
@@ -229,6 +230,12 @@ def load_data(
         lambda x: x["instance_id"] not in existing_ids,
         desc="filtering for existing ids",
     )
+    ### filter out examples that are not in the swe_bench verified
+    swe_bench = load_dataset("princeton-nlp/SWE-bench_Verified", split="test", num_proc=16)
+    dataset = dataset.filter(
+        lambda x: x["instance_id"]  in swe_bench["instance_id"],
+        desc="filtering for swe_bench verified",
+    )
     lens = torch.tensor(list(map(lambda x: len(x["input_ids"]), dataset)))  # recompute
     if shard_id is not None and num_shards is not None:
         logger.info(
@@ -280,9 +287,10 @@ def generate(model, dataset, tokenizer, temperature, top_p, fileobj, model_name_
     # stopping_criteria = StoppingCriteriaList([RepeatingTokensCriteria()])
     fail_count = 0
     sampling_params = vllm.SamplingParams(
-        max_tokens=200,
+        max_tokens=2000,
         temperature=1.0 if temperature == 0 else temperature,
         top_p=top_p,
+        stop=["</patch>\n\n</patch>\n\n"]
     )
     with torch.no_grad():
         for ix, instance in enumerate(tqdm(dataset, desc=f"Generating patches")):

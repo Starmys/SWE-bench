@@ -528,8 +528,18 @@ def main(
                 predictions = [json.loads(line) for line in f]
         else:
             raise ValueError("Predictions path must be \"gold\", .json, or .jsonl")
-    predictions = {pred[KEY_INSTANCE_ID]: pred for pred in predictions}
-
+    # Added by yuzhe, test all instances if instance_ids is "all"
+    if instance_ids == ["all"]:
+        instance_ids = [pred[KEY_INSTANCE_ID] for pred in predictions]
+        print(f"Running all instances: {len(instance_ids)}")
+    print(instance_ids)
+    if instance_ids == ['test_all']:
+        dataset = load_swebench_dataset(dataset_name, split)
+        instance_ids = [i[KEY_INSTANCE_ID] for i in dataset]
+        print(f"test_all, Running all instances: {len(instance_ids)}")
+    print(instance_ids)
+    predictions = {pred[KEY_INSTANCE_ID]: pred for pred in predictions if pred[KEY_INSTANCE_ID] in instance_ids}
+    print(f"num of predictions: {len(predictions)}")
     # get dataset from predictions
     dataset = get_dataset_from_preds(dataset_name, split, instance_ids, predictions, run_id)
     full_dataset = load_swebench_dataset(dataset_name, split)
@@ -566,7 +576,7 @@ if __name__ == "__main__":
         type=str,
         choices=["none", "base", "env", "instance"],
         help="Cache level - remove images above this level",
-        default="env",
+        default="instance",
     )
     # if clean is true then we remove all images that are above the cache level
     # if clean is false, we only remove images above the cache level if they don't already exist
@@ -575,5 +585,4 @@ if __name__ == "__main__":
     )
     parser.add_argument("--run_id", type=str, required=True, help="Run ID - identifies the run")
     args = parser.parse_args()
-
     main(**vars(args))
