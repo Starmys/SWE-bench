@@ -576,7 +576,7 @@ if __name__ == "__main__":
         type=str,
         choices=["none", "base", "env", "instance"],
         help="Cache level - remove images above this level",
-        default="instance",
+        default="env",
     )
     # if clean is true then we remove all images that are above the cache level
     # if clean is false, we only remove images above the cache level if they don't already exist
