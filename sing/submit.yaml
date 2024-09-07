@@ -1,0 +1,50 @@
+# target:
+#   service: sing
+#   name: GenAI-Shared-UKSouth2
+#   vc: singularity-genai-gpu-uksouth2
+
+target:
+  service: aisc 
+  #service: sing 
+  # name: msrresrchvc
+  name: msroctobasicvc
+
+code:
+  local_dir: $CONFIG_DIR/..
+
+environment:
+  # image: amlt-sing/acpt-pytorch-2.0.1-py3.10-cuda11.8
+  # image: amlt-sing/acpt-2.2.1-py3.10-cuda12.1
+  # image: amlt-sing/acpt-2.0.1-cuda11.8
+  # image: amlt-sing/acpt-pytorch-2.0.1-py3.10-cuda11.8
+  # image: pytorch/pytorch:2.3.0-cuda12.1-cudnn8-devel
+  # image:  amlt-sing/acpt-2.0.1-py3.10-cuda11.8
+  # image: amlt-sing/acpt-2.0.1-py3.10-cuda11.8
+  image: amlt-sing/acpt-2.3.0-py3.10-cuda12.1:20240514T152221998
+
+storage:
+  teamdrive:
+    storage_account_name: sanbpx4p3idss6q
+    container_name: longcontext
+    mount_dir: /mnt/longcontext
+
+
+jobs:
+- name: longrope_evaluation_ruler_phi31-128k-longrope-bf16-4x8-mix_9_6
+  # only need one node to prepare the model
+  sku: G1
+  identity: managed
+  submit_args:
+    env:
+      _AZUREML_SINGULARITY_JOB_UAI: /subscriptions/e546c811-2312-46e2-9fd0-c949c65da4d9/resourcegroups/srgx/providers/Microsoft.ManagedIdentity/userAssignedIdentities/srgxuai
+  priority: high
+  mpi: True
+  process_count_per_node: 1
+  command:
+    - nvidia-smi
+    - nvidia-smi topo -m
+    - nvcc --version
+    - pip list
+    - pip install -r requirements.txt
+    - python sing/dynamic_ft.py
+    - sleep infinity
