@@ -84,11 +84,12 @@ def remove_image(client, image_id, logger=None):
         log_error = logger.info
         log_info = logger.info
         raise_error = False
-
     try:
         log_info(f"Attempting to remove image {image_id}...")
         client.images.remove(image_id, force=True)
         log_info(f"Image {image_id} removed.")
+    except docker.errors.ImageNotFound:
+        log_info(f"Image {image_id} not found, removing has no effect.")
     except Exception as e:
         if raise_error:
             raise e
@@ -182,7 +183,7 @@ def exec_run_with_timeout(container, cmd, timeout: int|None=60):
         timeout (int): Timeout in seconds.
     """
     # Local variables to store the result of executing the command
-    exec_result = ''
+    exec_result = b''
     exec_id = None
     exception = None
     timed_out = False
@@ -194,7 +195,7 @@ def exec_run_with_timeout(container, cmd, timeout: int|None=60):
             exec_id = container.client.api.exec_create(container.id, cmd)["Id"]
             exec_stream = container.client.api.exec_start(exec_id, stream=True)
             for chunk in exec_stream:
-                exec_result += chunk.decode()
+                exec_result += chunk
         except Exception as e:
             exception = e
 
@@ -214,7 +215,7 @@ def exec_run_with_timeout(container, cmd, timeout: int|None=60):
             container.exec_run(f"kill -TERM {exec_pid}", detach=True)
         timed_out = True
     end_time = time.time()
-    return exec_result, timed_out, end_time - start_time
+    return exec_result.decode(), timed_out, end_time - start_time
 
 
 def find_dependent_images(client: docker.DockerClient, image_name: str):
