@@ -170,3 +170,7 @@ cython_debug/
 data/repos/copies
 notebooks/
 *logs/
+
+# Server
+uploads/
+!outputs/dummy_output.jsonl
